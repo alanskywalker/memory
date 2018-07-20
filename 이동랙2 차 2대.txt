@@ -1,0 +1,1059 @@
+#include<stdio.h>
+#include<windows.h>
+#include<conio.h>
+#include<time.h>
+#include<stdlib.h>
+#include<iostream>
+#include<algorithm>
+#include<functional>
+#include<math.h>
+
+using namespace std;
+
+#define WARE_X 22
+#define WARE_Y 23
+#define EMPTY 0
+#define WALL 1//■
+#define RACK 2//□
+#define CART 3//★
+#define TARGET 4
+#define MOVING 8
+#define RACK_ON 9//▤
+#define X_Adj 3
+#define Y_Adj 2
+#define STATUS_X_ADJ 26
+
+
+//direction
+#define UP 1
+#define DOWN 3
+#define LEFT 4
+#define RIGHT 2
+
+#define TMN 8//(Total Mother Number)
+#define TRNX 16//(Total Rack Number X axix)
+#define TRNY 16//(Total Rack Number Y axix)
+#define TRN 256//(Total Whole Rack Number)
+
+
+
+typedef enum { NOCURSOR, SOLIDCURSOR, NORMALCURSOR } CURSOR_TYPE;
+void setcursortype(CURSOR_TYPE c) { //커서숨기는 함수 
+	CONSOLE_CURSOR_INFO CurInfo;
+
+	switch (c) {
+	case NOCURSOR:
+		CurInfo.dwSize = 1;
+		CurInfo.bVisible = FALSE;
+		break;
+	case SOLIDCURSOR:
+		CurInfo.dwSize = 100;
+		CurInfo.bVisible = TRUE;
+		break;
+	case NORMALCURSOR:
+		CurInfo.dwSize = 20;
+		CurInfo.bVisible = TRUE;
+		break;
+	}
+	SetConsoleCursorInfo(GetStdHandle(STD_OUTPUT_HANDLE), &CurInfo);
+}
+
+int main_W[WARE_Y][WARE_X];
+int main_cpy[WARE_Y][WARE_X];
+int WorkPlace = 16;
+int ToDo[20];//스케줄링 단위 해야할 일
+int workA[16];//workA~B 작업공간에 따른 분류
+int workB[7][32];
+int workC[16];
+int Space = 17;//작업공간 아랫부분 main_W j 좌표
+int FSpace;//목표 Space
+		   //int SEQ = 0;//cart의 이동매개변수
+int MoveFlag = 0;// 랙이 이동해야하는지 알려주는 플래그
+int MoveC = 0;//cart가 움직인횟수
+int MoveR = 0;//Rack이 움직인 횟수
+int JobD = 0;//끝마친 일 개수
+int Produced = 0;
+
+
+class location {
+public:
+	int x, y;
+	location(int x1, int y1) :x(x1), y(y1) {};
+};
+
+class rack {
+public:
+	location L;//main_W[][]의 좌표
+	int RN;
+	rack(int RN, int x1, int y1) : RN(RN), L(x1, y1) { main_W[x1][y1] = RACK; };
+	void moveup() {
+		int x = L.x;
+		int y = L.y;
+		int k = main_W[x][y];//원래 랙의 상태
+		main_W[x][y] = EMPTY;
+		main_W[x - 1][y] = k;
+		L.x = x - 1;
+	}
+
+	void movedown() {
+		int x = L.x;
+		int y = L.y;
+		int k = main_W[x][y];//원래 랙의 상태
+		main_W[x + 1][y] = k;
+		main_W[x][y] = EMPTY;
+		L.x = x + 1;
+	}
+
+};
+
+class cart {
+public:
+	location L;
+	int Working = 1;
+	int CN;//CartNumber
+	int route[100];
+	int Doing;// 현재 하는일 1~256
+	int RLs;// 오른쪽으로 가는지 왼쪽으로 가는지 왼쪽(1) 오른쪽 (2)
+	int SEQ = 0;
+	cart(int CN, int x1 = 21, int y1 = 10, int r = 1) :CN(CN), L(x1, y1) { main_W[x1][y1] = CART; };//카트 생성
+
+	void getJob1() {//Doing 결정 cart1
+		for (int i = 0; i < 16; i++) {
+			if (workA[i]) {
+				Doing = i + 241;
+				workA[i] = 0;
+				RLs = RL(Doing);
+				return;
+			}
+		}
+	void getJob1() {//Doing 결정 cart1
+		for (int i = 0; i < 16; i++) {
+			if (workA[i]) {
+				Doing = i + 241;
+				workA[i] = 0;
+				RLs = RL(Doing);
+				return;
+			}
+		}
+
+		int k = (Space - 5) / 2;
+		for (int i = 0; i < 32; i++) {
+			if (workB[k][i]) {
+				Doing = k * 32 + i + 16;
+				workB[k][i] = 0;
+				RLs = RL(Doing);
+				return;
+			}
+		}
+
+		int l = countB();
+		int m = countC();
+		if (m<5) {
+			for (int i = 0; i < 32; i++) {
+				if (workB[l][i]) {
+					Doing = l * 32 + i + 16;
+					MoveFlag = 1;//랙이 움직여야 한다는 신호
+					FSpace = 5 + 2 * l;
+					RLs = RL(Doing);
+					return;
+				}
+			}
+		}
+
+		for (int i = 0; i < 16; i++) {
+			if (workC[i]) {
+				Doing = i;
+				workC[i] = 0;
+				RLs = RL(Doing);
+				return;
+			}
+		}
+	}
+
+	void getJob2(int a) {//2번째 cart의 일 할당
+		if (a == 1) {
+
+			int k = (Space - 5) / 2;
+			for (int i = 9; 8<i&& i<17; i++) {
+				if (workB[k][i]) {
+					Doing = k * 32 + i + 16;
+					workB[k][i] = 0;
+					return;
+				}
+			}
+
+			for (int i = 25; 24<i&& i<33; i++) {
+				if (workB[k][i]) {
+					Doing = k * 32 + i + 16;
+					workB[k][i] = 0;
+					return;
+				}
+			}
+
+		}
+
+		if (a == 2) {
+
+			int k = (Space - 5) / 2;
+			for (int i = 1; 0<i &&i<9; i++) {
+				if (workB[k][i]) {
+					Doing = k * 32 + i + 16;
+					workB[k][i] = 0;
+					return;
+				}
+			}
+
+			for (int i = 17; 16<i&& i <25; i++) {
+				if (workB[k][i]) {
+					Doing = k * 32 + i + 16;
+					workB[k][i] = 0;
+					return;
+				}
+			}
+		}
+
+	}
+	void move() {//cart 이동
+		int k = route[SEQ];
+		switch (k) {
+		case 4:--L.y; main_W[L.x][L.y] = CART; main_W[L.x][L.y + 1] = EMPTY;  break;//왼쪽
+		case 3:++L.x; main_W[L.x][L.y] = CART; main_W[L.x - 1][L.y] = EMPTY;  break;//아래쪽
+		case 2:++L.y; main_W[L.x][L.y] = CART; main_W[L.x][L.y - 1] = EMPTY;  break;//오른쪽
+		case 1:--L.x; main_W[L.x][L.y] = CART; main_W[L.x + 1][L.y] = EMPTY;  break;//위쪽
+		}
+		SEQ++;
+		MoveC++;
+
+		if (main_W[L.x - 1][L.y] == TARGET) {//도착했다는 뜻이다
+			main_W[L.x - 1][L.y] = RACK;// 가져갔으니 Rack은 보통상태로돌아옴
+			JobD++;
+			SEQ++;
+		}
+		else if (main_W[L.x + 1][L.y] == TARGET) {//도착했다는 뜻이다
+			main_W[L.x + 1][L.y] = RACK;// 가져갔으니 Rack은 보통상태로돌아옴
+			JobD++;
+			SEQ++;
+		}
+		else if (L.x == 21 && L.y == 10) { SEQ = 0; this->Working = 0; }//배달완료시 이동매개변수 0으로 초기화
+	}
+	void move2() {//cart2 이동
+		int k = route[SEQ];
+
+		switch (k) {
+		case 4:
+			if (main_W[L.x][(L.y)-1] == CART) { return; }//갈 길에 cart 가 있으면 함수종료
+			--L.y; 
+			main_W[L.x][L.y] = CART; main_W[L.x][L.y + 1] = EMPTY;  break;//왼쪽
+		case 3:
+			if (main_W[(L.x)+1][(L.y)] == CART) { return; }//갈 길에 cart 가 있으면 함수종료
+			++L.x;
+			main_W[L.x][L.y] = CART; main_W[L.x - 1][L.y] = EMPTY;  break;//아래쪽
+		case 2:
+			if(main_W[(L.x)][(L.y)+1] == CART) { return; }//갈 길에 cart 가 있으면 함수종료
+			++L.y;
+			main_W[L.x][L.y] = CART; main_W[L.x][L.y - 1] = EMPTY;  break;//오른쪽
+		case 1:
+			if (main_W[(L.x) - 1][(L.y) + 1] == CART) { return; }//갈 길에 cart 가 있으면 함수종료
+			--L.x;
+			main_W[L.x][L.y] = CART; main_W[L.x + 1][L.y] = EMPTY;  break;//위쪽
+		}
+		SEQ++;
+		MoveC++;
+
+		if (main_W[L.x - 1][L.y] == TARGET) {//도착했다는 뜻이다
+			main_W[L.x - 1][L.y] = RACK;// 가져갔으니 Rack은 보통상태로돌아옴
+			JobD++;
+			SEQ++;
+		}
+		else if (main_W[L.x + 1][L.y] == TARGET) {//도착했다는 뜻이다
+			main_W[L.x + 1][L.y] = RACK;// 가져갔으니 Rack은 보통상태로돌아옴
+			JobD++;
+			SEQ++;
+		}
+		else if (L.x == 21 && L.y == 10) { SEQ = 0; this->Working = 0; }//배달완료시 이동매개변수 0으로 초기화
+	}
+
+	void Route() {
+		int k = 0;
+		int x = TransX(Doing);//현 작업의 X좌표
+		int y = TransY(Doing);//현 작업의 Y좌표
+
+		if (Doing <= 256 && Doing >= 241) {
+			route[0] = 1;
+			k++;
+			if (Doing == 248) {
+				route[1] = 3;
+				k++;
+				return;
+			}
+
+			if (x > 8) {//right side
+				for (int i = 1; i <= abs(x - 8); i++) {
+					route[i] = 2;
+					k++;
+				}
+				//갔다가
+
+				for (int i = 1; i <= abs(x - 8); i++) {
+					route[i] = 4;
+					k++;
+				}
+				//다시오기
+				route[k] = 3;
+				return;
+			}
+
+			if (x < 8) {//left side
+				for (int i = 1; i <= abs(x - 8); i++) {
+					route[i] = 4;
+					k++;
+				}
+				//갔다가
+
+				for (int i = 1; i <= abs(x - 8); i++) {
+					route[i] = 2;
+					k++;
+				}
+				//다시오기
+				route[k] = 3;
+				return;
+			}
+
+		}
+
+		if (Doing <= 240 && Doing >= 17) {
+			int a = 0;
+			if (x > 8) {//right side
+				for (int i = 0; i < 9; i++) {// first move right
+					route[k] = 2;
+					k++;
+				}
+				for (int i = 0; i < (21 - Space); i++) {//move up to work space
+					route[k] = 1;
+					k++;
+				}
+				if (!(HJ(Doing / 16)) || ((Doing % 32 == 0))) {//위에 있다는 뜻,16으로 나눈 몫이 홀수 OR 32배수
+					if (Doing % 16 == 0) return;
+					route[k] = 1;
+					k++;
+					a = 1;
+				}
+				for (int i = 0; i < (17 - x); i++) {
+					route[k] = 4;
+					k++;
+				}
+				//======================================now going out
+
+				for (int i = 0; i < (18 - x); i++) {//let me out 1칸 더 나와야 함 내규상
+					route[k] = 2;
+					k++;
+				}
+				for (int i = 0; i < (21 - Space); i++) {//going home
+					route[k] = 3;
+					k++;
+				}
+				if (a) {
+					route[k] = 3;
+					k++;
+				}
+
+				for (int i = 0; i < 10; i++) {// last move right
+					route[k] = 4;
+					k++;
+				}
+			}
+
+			else if (x <= 8) {//left side
+				for (int i = 0; i < 9; i++) {// first move left
+					route[k] = 4;
+					k++;
+				}
+				for (int i = 0; i < (21 - Space); i++) {//move up to work space
+					route[k] = 1;
+					k++;
+				}
+				if (!(HJ(Doing / 16)) || ((Doing % 32 == 0))) {//위에 있다는 뜻,16으로 나눈 몫이 홀수 OR 32배수
+					if (Doing % 16 == 0) return;
+					route[k] = 1;
+					k++;
+					a = 1;
+				}
+				for (int i = 0; i < (17 - x); i++) {
+					route[k] = 2;
+					k++;
+				}
+				//======================================now going out
+
+				for (int i = 0; i < (18 - x); i++) {//let me out 1칸 더 나와야 함 내규상
+					route[k] = 4;
+					k++;
+				}
+				for (int i = 0; i < (21 - Space); i++) {//going home
+					route[k] = 3;
+					k++;
+				}
+				if (a) {
+					route[k] = 3;
+					k++;
+				}
+
+				for (int i = 0; i < 10; i++) {// last move left
+					route[k] = 2;
+					k++;
+				}
+			}
+		}
+
+		if (Doing <= 16) {
+			if (x > 8) {//right side
+				for (int i = 0; i < 9; i++) {// first move right
+					route[k] = 2;
+					k++;
+				}
+				for (int i = 0; i < 20; i++) {//move up to roof
+					route[k] = 1;
+					k++;
+				}
+				for (int i = 0; i < (17 - x); i++) {
+					route[k] = 4;
+					k++;
+				}
+				for (int i = 0; i < (18 - x); i++) {
+					route[k] = 2;
+					k++;
+				}
+				for (int i = 0; i < 20; i++) {//move down to bottom
+					route[k] = 3;
+					k++;
+				}
+				for (int i = 0; i < 10; i++) {// first move right
+					route[k] = 4;
+					k++;
+				}
+			}
+			else if (x <= 8) {//left side
+				for (int i = 0; i < 8; i++) {//first move left
+					route[k] = 4;
+					k++;
+				}
+				for (int i = 0; i < 20; i++) {//move up to roof
+					route[k] = 1;
+					k++;
+				}
+				for (int i = 0; i < x + 1; i++) {
+					route[k] = 2;
+					k++;
+				}
+				for (int i = 0; i < x + 2; i++) {
+					route[k] = 4;
+					k++;
+				}
+				for (int i = 0; i < 20; i++) {//move down to bottom
+					route[k] = 3;
+					k++;
+				}
+				for (int i = 0; i < 10; i++) {// last move right
+					route[k] = 2;
+					k++;
+				}
+
+
+
+			}
+		}
+	}
+	
+};
+
+
+
+class RackHandler {
+public:
+	rack * racklist[257];//0은 default,, 1~256
+	int Num;//rack 순서
+	RackHandler() :Num(0) {}
+	void SetRack(rack *box) {
+		racklist[Num++] = box;
+	}
+	void MoveRack(int k, int ud) {//ud ==1 up , ud == 0 down;, k is first number of mother rack
+		if (ud) {//moving up !!!주의 움직일때 위의 것 부터 움직여야 한다!!!!
+			for (int i = 0; i < 32; i++) {
+				racklist[k + i]->moveup();
+
+			}
+			return;
+		}
+		else {//moving down  !!!주의 움직일때 아래것 부터 움직여야 한다!!!!
+			for (int i = 0; i < 32; i++) {
+				racklist[k - i]->movedown();
+
+			}
+			return;
+		}
+	}
+	void Targeting(cart &C) {//타겟을 그림그리기
+		if (C.Doing>240 && C.Doing<257) {
+			main_W[racklist[C.Doing]->L.x][racklist[C.Doing]->L.y] = TARGET;
+		}
+		else if (C.Doing % 16 == 0) { main_W[racklist[C.Doing]->L.x][racklist[C.Doing]->L.y] = TARGET; }
+		else main_W[racklist[C.Doing]->L.x][racklist[C.Doing]->L.y + 1] = TARGET;
+	}
+	void MakeWork() {//1개의 작업 생성 및 분류까지 다함
+		int q;
+
+		q = (rand() % 256) + 1;
+		Produced = q;
+		int b1, b2;
+		if (q <= 16) {
+			workC[q - 1] = RACK_ON;
+			main_W[racklist[q]->L.x][racklist[q]->L.y] = RACK_ON;
+		}
+
+		else if (q > 16 && q <= 240) {
+			b1 = (q - 16) / 32, b2 = (q - 16) % 32;
+			workB[b1][b2 - 1] = RACK_ON;
+			main_W[racklist[q]->L.x][racklist[q]->L.y] = RACK_ON;
+		}
+		else if (q > 240) {
+			workA[q - 241] = RACK_ON;
+			main_W[racklist[q]->L.x][racklist[q]->L.y] = RACK_ON;
+		}
+	}
+};
+
+class WorkHandler {
+
+};
+
+
+			  /////////////////////=============================================================================================================///////////////////////////////////////////////////////////////////////////////////////////////
+int main() {
+
+	srand(time(NULL));
+	setcursortype(NOCURSOR);
+	BuildWareHouse();
+
+
+	RackHandler H;
+	MakeRack(H);
+	cart cart1(1);
+	cart cart2(1);
+
+	for (int i = 0; i < 20; i++) {//초반 작업 생성
+		H.MakeWork();
+		DrawWareHouse();
+		DrawStatus();
+	}
+
+	Sleep(1000);
+	H.MoveRack(256, 0);	// down 은 맨 뒷칸부터 움직여야 한다.
+	DrawWareHouse();
+	H.MoveRack(256, 0);
+	Sleep(1000);
+	DrawWareHouse();
+	Sleep(1000);
+
+
+
+
+	while (1) {
+	H.MakeWork();
+	DrawStatus();
+
+
+	H.Targeting(cart1);
+	H.Targeting(cart2);
+	cart.Working = 1;
+	Route(cart);
+
+	while (cart.Working) {
+	while (MoveFlag) {
+	if (Space > FSpace) {
+	H.MoveRack((Space - 2 * x - 1) * 16, 0);
+	DrawWareHouse();
+	MoveR++;
+	DrawStatus();
+	Sleep(500);
+	H.MoveRack((Space - 2 * x - 1) * 16, 0);
+	DrawWareHouse();
+	MoveR++;
+	DrawStatus();
+	Sleep(500);
+	x++;
+	if ((Space - FSpace) / 2 < x) { MoveFlag = 0; x = 1; int k = FSpace; Space = k; }
+	Route(cart);
+	}
+	if (Space < FSpace) {
+	H.MoveRack((Space + 2 * x - 5) * 16 + 1, 1);
+	DrawWareHouse();
+	MoveR++;
+	DrawStatus();
+	Sleep(500);
+	H.MoveRack((Space + 2 * x - 5) * 16 + 1, 1);
+	DrawWareHouse();
+	MoveR++;
+	DrawStatus();
+	Sleep(500);
+	x++;
+	if ((FSpace - Space) / 2 < x) {
+	MoveFlag = 0; x = 1; int k = FSpace; Space = k;
+	Route(cart);
+	}
+	}
+
+	}
+	cart.move();
+	Sleep(100);
+	DrawWareHouse();
+	DrawStatus();
+	}
+
+	}
+
+}
+
+void BuildWareHouse() {
+	int i, j;
+	for (i = 0; i < WARE_Y; i++) {
+		for (j = 0; j < WARE_X; j++) {
+			main_W[i][j] = 0;
+			main_cpy[i][j] = 100;
+		}
+	}
+
+	for (j = 0; j < WARE_X; j++) {//하단생성
+		main_W[WARE_Y - 1][j] = WALL;
+	}
+	for (i = 0; i < WARE_Y; i++) {//좌단생성
+		main_W[i][0] = WALL;
+	}
+	for (i = 0; i < WARE_Y; i++) {//우단생성
+		main_W[i][WARE_X - 1] = WALL;
+	}
+	for (j = 0; j < WARE_X; j++) {//상단 생성
+		main_W[0][j] = WALL;
+	}
+}
+void DrawWareHouse() {//rack과 지게차들을 그려준다
+	int i, j;
+	for (i = 0; i < WARE_Y; i++) {
+		for (j = 0; j < WARE_X; j++) {
+			if (main_W[i][j] != main_cpy[i][j])//이것 때문에 천장이 지워지는데 어떻게해야할지 모르겠다
+			{
+				gotoxy(X_Adj + j, Y_Adj + i);//창고내부
+				switch (main_W[i][j]) {
+				case RACK:
+					printf("□");
+					break;
+				case WALL:
+					printf("■");
+					break;
+				case CART:
+					printf("★");
+					break;
+				case EMPTY:
+					printf("  ");
+					break;
+				case RACK_ON:
+					printf("▤");
+					break;
+				case TARGET:
+					printf("♥");
+					break;
+				}
+			}
+		}
+	}
+	for (i = 0; i < WARE_Y; i++) {
+		for (j = 0; j < WARE_X; j++) {
+			main_cpy[i][j] = main_W[i][j];
+		}
+	}
+}
+void DrawStatus() {
+	int y = 3;
+	//gotoxy(STATUS_X_ADJ, y); printf(" Doing : %d", Doing);
+
+	gotoxy(STATUS_X_ADJ, y + 2); printf("+-  W O R K  -+ ");
+	gotoxy(STATUS_X_ADJ, y + 3); printf("|             | ");
+	gotoxy(STATUS_X_ADJ, y + 4); printf("|             | ");
+	gotoxy(STATUS_X_ADJ, y + 5); printf("|             | ");
+	gotoxy(STATUS_X_ADJ, y + 6); printf("+-- ------- --+ ");
+	gotoxy(STATUS_X_ADJ, y + 7); printf("|    %d       | ", Produced);
+	gotoxy(STATUS_X_ADJ, y + 8);  cout << "Doing!!! ";
+	gotoxy(STATUS_X_ADJ, y + 9); cout << "(" << "W@@@@@@@" << ")" << endl;//for (int i = 0; i < 16; i++) { if (workC[i]) { cout << "[" << i << "]" << workC[i] << " "; } }
+	gotoxy(STATUS_X_ADJ, y + 10); cout << "Space!! ";
+	gotoxy(STATUS_X_ADJ, y + 11); cout << "(" << Space << ")" << endl;
+	gotoxy(STATUS_X_ADJ, y + 12); cout << "작업량: " << JobD << endl;
+	gotoxy(STATUS_X_ADJ, y + 13); cout << "차 이동거리: " << MoveC << endl;
+	gotoxy(STATUS_X_ADJ, y + 14);  cout << "랙 이동량: " << MoveR << endl;
+	gotoxy(STATUS_X_ADJ, y + 15);  cout << "<남은 작업> ";
+	gotoxy(STATUS_X_ADJ, y + 16); cout << "workA: "; for (int i = 0; i < 16; i++) { if (workA[i]) printf("%d, ", i); }
+	gotoxy(STATUS_X_ADJ, y + 17); cout << "workB: "; for (int i = 0; i < 32; i++) { if (workB[(Space - 5) / 2][i]) printf("%d, ", i); }
+	gotoxy(STATUS_X_ADJ, y + 18); cout << "workC: "; for (int i = 0; i < 16; i++) { if (workC[i]) printf("%d, ", i); }
+
+}
+void MakeRack(RackHandler &H)
+{
+
+	int r = 1;
+	H.SetRack(new rack(0, -1, -1));
+	for (int i = 2; i < TRNY + 2; i++) {//rack 생성
+		switch (i) {
+
+		case 2:
+		case 3:
+			for (int j = 3; j < TRNX + 3; j++) {
+				H.SetRack(new rack(r, i, j));
+				r++;
+			}
+			break;
+		case 4:
+		case 5:
+			for (int j = 3; j < TRNX + 3; j++) {
+				H.SetRack(new rack(r, i, j));
+				r++;
+			}
+			break;
+		case 6:
+		case 7:
+			for (int j = 3; j < TRNX + 3; j++) {
+				H.SetRack(new rack(r, i, j));
+				r++;
+			}
+			break;
+		case 8:
+		case 9:
+			for (int j = 3; j < TRNX + 3; j++) {
+				H.SetRack(new rack(r, i, j));
+				r++;
+			}
+			break;
+		case 10:
+		case 11:
+			for (int j = 3; j < TRNX + 3; j++) {
+				H.SetRack(new rack(r, i, j));
+				r++;
+			}
+			break;
+		case 12:
+		case 13:
+			for (int j = 3; j < TRNX + 3; j++) {
+				H.SetRack(new rack(r, i, j));
+				r++;
+			}
+			break;
+		case 14:
+		case 15:
+			for (int j = 3; j < TRNX + 3; j++) {
+				H.SetRack(new rack(r, i, j));
+				r++;
+			}
+			break;
+		case 16:
+		case 17:
+			for (int j = 3; j < TRNX + 3; j++) {
+				H.SetRack(new rack(r, i, j));
+				r++;
+			}
+			break;
+		}
+
+	}
+
+}
+void SetWork() {//처음 19개의 난수로 작업발생 1~256
+	int x = 0, y = 0;
+	for (int i = 0; i < 20; i++) {
+		x = (rand() % 256) + 1;
+		for (int j = 0; j < 19; j++) {
+			if (ToDo[j] == x) {
+				i--; y = 0;  break;
+			}
+			else y = 1;
+		}
+		if (y) ToDo[i] = x;
+	}
+	sort(ToDo, ToDo + 20, greater<int>());//숫자가 큰 순서대로 정렬
+	for (int i = 0; i < 20; i++) {
+		cout << ToDo[i] << endl;
+	}
+}
+
+void Classification() {
+	int b1 = 0, b2 = 0;// ToDo[i]작업 분류
+	for (int i = 0; i < 20; i++) {
+		if (ToDo[i] <= 16) {
+			workC[ToDo[i] - 1] = RACK_ON;
+			main_W[2][ToDo[i] + 2] = RACK_ON;
+		}
+
+		else if (ToDo[i] > 16 && ToDo[i] <= 240) {
+			b1 = (ToDo[i] - 16) / 32, b2 = (ToDo[i] - 16) % 32;
+			workB[b1][b2 - 1] = RACK_ON;
+			if (ToDo[i] % 16 == 0) { main_W[ToDo[i] / 16 + 1][18] = RACK_ON; }
+			else { main_W[ToDo[i] / 16 + 2][ToDo[i] % 16 + 2] = RACK_ON; }
+		}
+		else if (ToDo[i] > 240) {
+			workA[ToDo[i] - 241] = RACK_ON;
+			cout << "workA Produced!" << endl;
+			gotoxy(STATUS_X_ADJ + 11, 2);
+			for (int i = 0; i < 16; i++) {
+				if (workA[i]) { cout << "[" << i << "]" << workA[i] << " "; }
+			}
+			main_W[17][ToDo[i] - 238] = RACK_ON;
+		}
+	}
+}
+
+int TransY(int t) {// 1~256 숫자의 [y]좌표..[수직축]를 구해준다(1~16) ex 249 -->16, 8-->1
+	if (t / 16 == 0) return 16;
+	else return t / 16 + 1;
+}
+int TransX(int t) {// 1~256 숫자의 [X]좌표..[수평축]를 구해준다(1~16) ex 256--> 16, 225 -->1
+	if (t % 16 == 0) return 16;
+	else return t % 16;
+}
+void gotoxy(int x, int y) { //gotoxy함수 
+	COORD pos = { 2 * x,y };
+	SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
+}
+
+int RL(int a) {//카트가 오른쪽인지 왼쪽인지 결정
+	if (a % 16 <= 8) {
+		return 1;
+	}
+	else return 2;
+}
+int countC() {
+	int result = 0;
+	for (int i = 0; i < 16; i++) {
+		if (workC[i]) result++;
+	}
+	return result;
+}int countC() {
+	int result = 0;
+	for (int i = 0; i < 16; i++) {
+		if (workC[i]) result++;
+	}
+	return result;
+}
+int countB() {//가장 일이 많이 있는 곳을 찾아서 숫자를 내뱉는다. result 0 --> work[0][x]에 일이 가장 많다.
+	int b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, b7 = 0;
+	for (int i = 0; i < 32; i++) {
+		if (workB[0][i]) b1++;
+	}
+
+	for (int i = 0; i < 32; i++) {
+		if (workB[1][i]) b2++;
+	}
+
+	for (int i = 0; i < 32; i++) {
+		if (workB[2][i]) b3++;
+	}
+
+	for (int i = 0; i < 32; i++) {
+		if (workB[3][i]) b4++;
+	}
+
+	for (int i = 0; i < 32; i++) {
+		if (workB[4][i]) b5++;
+	}
+
+	for (int i = 0; i < 32; i++) {
+		if (workB[5][i]) b6++;
+	}
+
+	for (int i = 0; i < 32; i++) {
+		if (workB[6][i]) b7++;
+	}
+	int result = 0;
+	int maxval = b1;
+	int maxvalC = maxval;
+	maxval = max(maxval, b2);
+	if (maxval != maxvalC) {
+		result = 1;
+	}
+	maxvalC = maxval;
+
+	maxval = max(maxval, b3);
+	if (maxval != maxvalC) {
+		result = 2;
+	}
+	maxvalC = maxval;
+
+	maxval = max(maxval, b4);
+	if (maxval != maxvalC) {
+		result = 3;
+	}
+	maxvalC = maxval;
+
+	maxval = max(maxval, b5);
+	if (maxval != maxvalC) {
+		result = 4;
+	}
+	maxvalC = maxval;
+
+	maxval = max(maxval, b6);
+	if (maxval != maxvalC) {
+		result = 5;
+	}
+	maxvalC = maxval;
+
+	maxval = max(maxval, b7);
+	if (maxval != maxvalC) {
+		result = 6;
+	}
+	maxvalC = maxval;
+
+	return result;
+}
+int countC() {
+	int result = 0;
+	for (int i = 0; i < 16; i++) {
+		if (workC[i]) result++;
+	}
+	return result;
+}
+/*
+void Route(cart &cart) {//어느 카트의 경로 정하기
+
+
+	int x = TransX(cart.Doing);//현 작업의 X좌표
+	int y = TransY(cart.Doing);//현 작업의 Y좌표
+
+						  //workA의 작업루트~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	if (Doing <= 256 && Doing >= 241) {
+		cart.route[0] = 1;
+		if (x == 8) return;
+
+		if (x>8) {//right side
+			for (int i = 1; i <= abs(x - 8); i++)
+				cart.route[i] = 2;
+		}
+
+		if (x<8) {// left side
+			for (int i = 1; i <= abs(x - 8); i++)
+				cart.route[i] = 4;
+		}
+
+	}
+	int k = 0;
+
+	//workB의 작업루트~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	if (Doing <= 240 && Doing >= 17) {
+		if (x > 8) {//right side
+			for (int i = 0; i < 9; i++) {// first move right
+				cart.route[k] = 2;
+				k++;
+			}
+			for (int i = 0; i < (21 - Space); i++) {//move up to work space
+				cart.route[k] = 1;
+				k++;
+			}
+			if (!(HJ(Doing / 16)) || ((Doing % 32 == 0))) {//위에 있다는 뜻,16으로 나눈 몫이 짝수 OR
+				cart.route[k] = 1;
+				k++;
+			}
+			for (int i = 0; i < (17 - x); i++) {
+				cart.route[k] = 4;
+				k++;
+			}
+		}
+		else if (x <= 8) {//left side
+			for (int i = 0; i < 8; i++) {
+				cart.route[k] = 4;
+				k++;
+			}
+			for (int i = 0; i < (21 - Space); i++) {//move up to work space
+				cart.route[k] = 1;
+				k++;
+			}
+			if (!(HJ(Doing / 16)) || ((Doing % 32 == 0))) {//if (!(HJ(Doing / 16) || (HJ(Doing / 16) && Doing % 16 == 0))) {//위에 있다는 뜻,16으로 나눈 몫이 짝수 OR
+				cart.route[k] = 1;
+				k++;
+			}
+
+			for (int i = 0; i < x + 1; i++) {
+				cart.route[k] = 2;
+				k++;
+			}
+
+		}
+	}
+	//workC의 작업루트~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	if (Doing <= 16) {
+		if (x > 8) {//right side
+			for (int i = 0; i < 9; i++) {// first move right
+				cart.route[k] = 2;
+				k++;
+			}
+			for (int i = 0; i < 20; i++) {//move up to roof
+				cart.route[k] = 1;
+				k++;
+			}
+			for (int i = 0; i < (17 - x); i++) {
+				cart.route[k] = 4;
+				k++;
+			}
+		}
+		else if (x <= 8) {//left side
+			for (int i = 0; i < 8; i++) {//first move left
+				cart.route[k] = 4;
+				k++;
+			}
+			for (int i = 0; i < 20; i++) {//move up to roof
+				cart.route[k] = 1;
+				k++;
+			}
+			for (int i = 0; i < x + 1; i++) {
+				cart.route[k] = 2;
+				k++;
+			}
+
+		}
+	}
+}
+*/
+bool HJ(int k) {// 홀이면 거짓 짝이면 참
+	if (k % 2 == 0) return true;
+	if (k % 2 == 1) return false;
+}
+void MoveRack(int k, int ud) {//ud ==1 up , ud == 0 down;, k is motherrack Y =MY Mother의 아래부분// 사용자 정의 테스트용
+	if (ud) {//moving up
+		for (int i = 0; i < 2; k++, i++) {
+			for (int j = 0; j < 16; j++) {
+
+				main_W[k - 1][j + 3] = main_W[k][j + 3];
+				main_W[k][j + 3] = 0;
+			}
+		}
+		return;
+	}
+	//moving down
+	for (int i = 0; i <2; k--, i++) {
+		for (int j = 0; j < 16; j++) {
+			main_W[k + 1][j + 3] = main_W[k][j + 3];
+			main_W[k][j + 3] = 0;
+		}
+	}
+}
+//창고테스트
+/*
+for (int i = 0; i < 23;i++) {
+for (int j = 0; j < 22; j++){
+cout << main_W[i][j];
+}
+cout << endl;
+}
+*/
+
+//작업 테스트
+/*
+
+for (int i = 5; i < 7; i++) {
+for (int j = 0; j<32; j++)
+if (workB[i][j]) { cout << i << "," << j << "(" << workB[i][j] << ")" << " "; }
+}
+
+*/
